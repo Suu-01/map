@@ -1,9 +1,12 @@
 package com.du.gis_project.service;
 
+import com.du.gis_project.config.GisConfig;
+import com.du.gis_project.domain.dto.HeatmapPointDto;
 import com.du.gis_project.domain.entity.PopulationPoint;
 import com.du.gis_project.domain.entity.RiskPoint;
 import com.du.gis_project.repository.PopulationPointRepository;
 import com.du.gis_project.repository.RiskPointRepository;
+import com.du.gis_project.util.DistanceUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -20,60 +23,80 @@ public class RiskIntegrationService {
 
     private final RiskPointRepository riskPointRepository;
     private final PopulationPointRepository populationPointRepository;
+    private final GisConfig gisConfig;
 
     public RiskIntegrationService(RiskPointRepository riskPointRepository,
-            PopulationPointRepository populationPointRepository) {
+            PopulationPointRepository populationPointRepository,
+            GisConfig gisConfig) {
         this.riskPointRepository = riskPointRepository;
         this.populationPointRepository = populationPointRepository;
+        this.gisConfig = gisConfig;
     }
 
-    // Seongnam Bounds (Approx)
-    private static final double MIN_LAT = 37.330;
-    private static final double MAX_LAT = 37.490;
-    private static final double MIN_LON = 127.050;
-    private static final double MAX_LON = 127.180;
+    // 설정 클래스에서 값을 가져와 사용
+    private double getMinLat() {
+        return gisConfig.getMap().getBounds().getMinLat();
+    }
 
-    // Optimized density (~75m step) for best visibility/performance balance
-    private static final double STEP_LAT = 0.00067;
-    private static final double STEP_LON = 0.00082;
+    private double getMaxLat() {
+        return gisConfig.getMap().getBounds().getMaxLat();
+    }
+
+    private double getMinLon() {
+        return gisConfig.getMap().getBounds().getMinLon();
+    }
+
+    private double getMaxLon() {
+        return gisConfig.getMap().getBounds().getMaxLon();
+    }
+
+    private double getStepLat() {
+        return gisConfig.getMap().getGrid().getStepLat();
+    }
+
+    private double getStepLon() {
+        return gisConfig.getMap().getGrid().getStepLon();
+    }
 
     @SuppressWarnings("unchecked")
-    public List<Map<String, Object>> calculateBlindSpots() {
-        // [Default Map] Refine facility radius to 200m for tighter safe zones
-        return (List<Map<String, Object>>) calculateGrid(2.5, 200, 0.8, 600, false).get("result");
+    public List<HeatmapPointDto> calculateBlindSpots() {
+        // [통합 위험도 지도] 기본 2.0점, 인구 최대 1.0점 추가 체계 (총 3.0점 만점)
+        return (List<HeatmapPointDto>) calculateGrid(2.0, 200, 0.5, 600, false).get("result");
     }
 
     public Map<String, Object> calculateRefinedRiskMap() {
-        // [Refined Map] Reduce facility radius to 200m, increase pop weight slightly
-        // for contrast
-        return calculateGrid(2.0, 200, 1.2, 700, true);
+        // [위험도 히트맵(정밀)] 사용자 원칙(2+1=3)에 따라 가중치 설정
+        return calculateGrid(2.0, 200, 0.5, 700, true);
     }
 
+    /**
+     * 특정 파라미터에 따라 격자(Grid) 내 각 지점의 위험 점수를 계산합니다.
+     */
     private Map<String, Object> calculateGrid(double baseScore, double facilityRadius,
             double popWeightMultiplier, double popRadius, boolean forceClipping) {
-        List<Map<String, Object>> results = new ArrayList<>();
+        List<HeatmapPointDto> results = new ArrayList<>();
 
         List<RiskPoint> facilities = riskPointRepository.findAll();
         List<PopulationPoint> popPoints = populationPointRepository.findAll();
 
-        log.info("Calculating Thermal Risk Map. Population Points Found: {}", popPoints.size());
+        log.info("열화상 위험도 계산 시작 (설정 기반). 발견된 인구 데이터 수: {}", popPoints.size());
 
         boolean hasPopulation = !popPoints.isEmpty();
         double maxPop = hasPopulation ? popPoints.stream().mapToInt(PopulationPoint::getCount).max().orElse(1) : 1;
 
-        for (double lat = MIN_LAT; lat <= MAX_LAT; lat += STEP_LAT) {
-            for (double lon = MIN_LON; lon <= MAX_LON; lon += STEP_LON) {
+        // 위도/경도 평면을 격자로 순회하며 각 포인트의 점수 계산
+        for (double lat = getMinLat(); lat <= getMaxLat(); lat += getStepLat()) {
+            for (double lon = getMinLon(); lon <= getMaxLon(); lon += getStepLon()) {
 
                 double score = baseScore;
 
-                // Shaping Logic: Strict clip to residential areas (1200m)
+                // 쉐이핑 로직: 인구가 전혀 없는 곳은 히트맵에서 제외
                 if (forceClipping) {
                     if (!hasPopulation)
-                        continue; // No population = No shape
-
+                        continue;
                     boolean nearPopCenter = false;
                     for (PopulationPoint pp : popPoints) {
-                        if (calculateDistance(lat, lon, pp.getLatitude(), pp.getLongitude()) < 1200) {
+                        if (DistanceUtil.calculateDistance(lat, lon, pp.getLatitude(), pp.getLongitude()) < 1200) {
                             nearPopCenter = true;
                             break;
                         }
@@ -81,10 +104,9 @@ public class RiskIntegrationService {
                     if (!nearPopCenter)
                         continue;
                 } else if (hasPopulation) {
-                    // Optional shaping for old map
                     boolean nearPopCenter = false;
                     for (PopulationPoint pp : popPoints) {
-                        if (calculateDistance(lat, lon, pp.getLatitude(), pp.getLongitude()) < 1800) {
+                        if (DistanceUtil.calculateDistance(lat, lon, pp.getLatitude(), pp.getLongitude()) < 1800) {
                             nearPopCenter = true;
                             break;
                         }
@@ -93,20 +115,19 @@ public class RiskIntegrationService {
                         continue;
                 }
 
-                // 1. Subtract Safety Facilities (Effect range: 200m)
+                // 1. 치안 시설물에 의한 위험도 차감
                 for (RiskPoint rp : facilities) {
-                    double dist = calculateDistance(lat, lon, rp.getLatitude(), rp.getLongitude());
+                    double dist = DistanceUtil.calculateDistance(lat, lon, rp.getLatitude(), rp.getLongitude());
                     if (dist < facilityRadius) {
                         double factor = 1.0 - (dist / facilityRadius);
-                        // Significant reduction near facility to ensure 'Blue' (low score)
-                        score -= (rp.getWeight() * factor * 1.5);
+                        score -= (rp.getWeight() * factor);
                     }
                 }
 
-                // 2. Add Population Factor (Risk added in dense areas)
+                // 2. 인구 밀집도에 의한 위험도 가산
                 if (hasPopulation) {
                     for (PopulationPoint pp : popPoints) {
-                        double dist = calculateDistance(lat, lon, pp.getLatitude(), pp.getLongitude());
+                        double dist = DistanceUtil.calculateDistance(lat, lon, pp.getLatitude(), pp.getLongitude());
                         if (dist < popRadius) {
                             double popRatio = (double) pp.getCount() / maxPop;
                             double popImpact = (popRatio * popWeightMultiplier * 2.0);
@@ -116,29 +137,14 @@ public class RiskIntegrationService {
                     }
                 }
 
-                // Clamp score (0.0=Safety/Blue, 8.0=Danger/Red)
-                score = Math.max(0.0, Math.min(score, 8.0));
+                score = Math.max(0.0, Math.min(score, 3.0));
 
-                Map<String, Object> point = new HashMap<>();
-                point.put("lat", lat);
-                point.put("lon", lon);
-                point.put("score", score);
-                results.add(point);
+                results.add(new HeatmapPointDto(lat, lon, score));
             }
         }
         Map<String, Object> response = new HashMap<>();
         response.put("result", results);
         response.put("popCount", popPoints.size());
         return response;
-    }
-
-    private double calculateDistance(double lat1, double lon1, double lat2, double lon2) {
-        double dLat = Math.toRadians(lat2 - lat1);
-        double dLon = Math.toRadians(lon2 - lon1);
-        double a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-                Math.cos(Math.toRadians(lat1)) * Math.cos(Math.toRadians(lat2)) *
-                        Math.sin(dLon / 2) * Math.sin(dLon / 2);
-        double c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-        return 6371000 * c;
     }
 }

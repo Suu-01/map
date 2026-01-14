@@ -1,5 +1,6 @@
 package com.du.gis_project.service;
 
+import com.du.gis_project.config.GisConfig;
 import com.du.gis_project.domain.entity.PopulationPoint;
 import com.du.gis_project.domain.entity.RiskPoint;
 import com.du.gis_project.domain.entity.RiskType;
@@ -33,13 +34,15 @@ public class CsvImportService {
     private static final Logger log = LoggerFactory.getLogger(CsvImportService.class);
     private final RiskPointRepository riskPointRepository;
     private final PopulationPointRepository populationPointRepository;
+    private final GisConfig gisConfig;
     private final ObjectMapper objectMapper = new ObjectMapper();
-    private final String VWORLD_KEY = "CF0C7D65-44C0-31CD-A6FF-80C2E693894A";
 
     public CsvImportService(RiskPointRepository riskPointRepository,
-            PopulationPointRepository populationPointRepository) {
+            PopulationPointRepository populationPointRepository,
+            GisConfig gisConfig) {
         this.riskPointRepository = riskPointRepository;
         this.populationPointRepository = populationPointRepository;
+        this.gisConfig = gisConfig;
     }
 
     @Transactional
@@ -342,7 +345,8 @@ public class CsvImportService {
 
             String encodedAddr = URLEncoder.encode(cleanAddress, StandardCharsets.UTF_8);
             String apiUrl = "https://api.vworld.kr/req/address?service=address&request=getcoord&version=2.0&crs=epsg:4326&address="
-                    + encodedAddr + "&refine=true&simple=false&format=json&type=PARCEL&key=" + VWORLD_KEY;
+                    + encodedAddr + "&refine=true&simple=false&format=json&type=PARCEL&key="
+                    + gisConfig.getVworld().getKey();
 
             URL url = URI.create(apiUrl).toURL();
             HttpURLConnection conn = (HttpURLConnection) url.openConnection();

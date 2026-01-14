@@ -1,6 +1,6 @@
 package com.du.gis_project.service;
 
-import com.du.gis_project.domain.entity.RiskPoint;
+import com.du.gis_project.domain.dto.RiskPointDto;
 import com.du.gis_project.domain.entity.RiskType;
 import com.du.gis_project.repository.RiskPointRepository;
 import org.springframework.stereotype.Service;
@@ -16,11 +16,15 @@ public class RiskService {
         this.riskPointRepository = riskPointRepository;
     }
 
-    public List<RiskPoint> getAllRisks() {
-        return riskPointRepository.findAll();
+    public List<RiskPointDto> getAllRisks() {
+        return riskPointRepository.findAll().stream()
+                .map(RiskPointDto::new)
+                .toList();
     }
 
-    public List<RiskPoint> getRisksByType(RiskType type) {
-        return riskPointRepository.findByType(type);
+    public List<RiskPointDto> getRisksByType(RiskType type) {
+        return riskPointRepository.findByType(type).stream()
+                .map(RiskPointDto::new)
+                .toList();
     }
 }

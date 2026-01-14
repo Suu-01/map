@@ -24,3 +24,23 @@ management:
 
 server:
   port: 8080
+
+# GIS 프로젝트 설정
+gis:
+  vworld:
+    key: "CF0C7D65-44C0-31CD-A6FF-80C2E693894A"
+  map:
+    # 성남시 중심 좌표
+    center:
+      lon: 127.138868
+      lat: 37.419720
+    # 성남시 경계 좌표
+    bounds:
+      min-lat: 37.330
+      max-lat: 37.490
+      min-lon: 127.050
+      max-lon: 127.180
+    # 위험도 그리드 설정
+    grid:
+      step-lat: 0.00067
+      step-lon: 0.00082

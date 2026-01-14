@@ -1,10 +1,12 @@
 package com.du.gis_project.controller;
 
-import com.du.gis_project.domain.entity.RiskPoint;
+import com.du.gis_project.domain.dto.RiskPointDto;
+import com.du.gis_project.domain.dto.HeatmapPointDto;
 import com.du.gis_project.domain.entity.RiskType;
 import com.du.gis_project.service.CsvImportService;
-import com.du.gis_project.service.RiskIntegrationService;
 import com.du.gis_project.service.RiskService;
+import com.du.gis_project.service.RiskIntegrationService;
+import com.du.gis_project.config.GisConfig;
 import org.springframework.http.converter.StringHttpMessageConverter;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.client.RestTemplate;
@@ -19,17 +21,17 @@ import java.util.Map;
 public class RiskApiController {
 
     // VWorld API Key
-    private final String VWORLD_KEY = "CF0C7D65-44C0-31CD-A6FF-80C2E693894A";
-
     private final CsvImportService csvImportService;
     private final RiskService riskService;
     private final RiskIntegrationService riskIntegrationService;
+    private final GisConfig gisConfig;
 
     public RiskApiController(CsvImportService csvImportService, RiskService riskService,
-            RiskIntegrationService riskIntegrationService) {
+            RiskIntegrationService riskIntegrationService, GisConfig gisConfig) {
         this.csvImportService = csvImportService;
         this.riskService = riskService;
         this.riskIntegrationService = riskIntegrationService;
+        this.gisConfig = gisConfig;
     }
 
     // ============================
@@ -61,7 +63,7 @@ public class RiskApiController {
     @GetMapping("/api/risks")
     public Map<String, Object> getRisks(@RequestParam(required = false) String type) {
         try {
-            List<RiskPoint> risks;
+            List<RiskPointDto> risks;
             if (type == null || type.equals("ALL") || type.isEmpty()) {
                 risks = riskService.getAllRisks();
             } else {
@@ -81,7 +83,7 @@ public class RiskApiController {
     @GetMapping("/api/risks/blind-spots")
     public Map<String, Object> getBlindSpots() {
         try {
-            List<Map<String, Object>> result = riskIntegrationService.calculateBlindSpots();
+            List<HeatmapPointDto> result = riskIntegrationService.calculateBlindSpots();
             return Map.of("status", "OK", "result", result);
         } catch (Exception e) {
             e.printStackTrace();
@@ -104,6 +106,11 @@ public class RiskApiController {
         }
     }
 
+    @GetMapping("/api/config")
+    public GisConfig getConfig() {
+        return gisConfig;
+    }
+
     // ============================
     // 2. VWorld Proxy Endpoints (Existing)
     // ============================
@@ -115,7 +122,7 @@ public class RiskApiController {
     public String getAddress(@RequestParam double lon, @RequestParam double lat) {
         String apiUrl = String.format(
                 "https://api.vworld.kr/req/address?service=address&request=getAddress&version=2.0&crs=epsg:4326&point=%f,%f&format=json&type=both&key=%s",
-                lon, lat, VWORLD_KEY);
+                lon, lat, gisConfig.getVworld().getKey());
 
         RestTemplate restTemplate = new RestTemplate();
         restTemplate.getMessageConverters().add(0, new StringHttpMessageConverter(StandardCharsets.UTF_8));
@@ -183,7 +190,7 @@ public class RiskApiController {
                     .queryParam("query", query)
                     .queryParam("type", type)
                     .queryParam("format", "json")
-                    .queryParam("key", VWORLD_KEY)
+                    .queryParam("key", gisConfig.getVworld().getKey())
                     .build()
                     .encode()
                     .toUri();
