@@ -79,7 +79,7 @@ public class RiskIntegrationService {
         List<RiskPoint> facilities = riskPointRepository.findAll();
         List<PopulationPoint> popPoints = populationPointRepository.findAll();
 
-        log.info("열화상 위험도 계산 시작 (설정 기반). 발견된 인구 데이터 수: {}", popPoints.size());
+        log.info("위험도 계산 시작 (설정 기반). 발견된 인구 데이터 수: {}", popPoints.size());
 
         boolean hasPopulation = !popPoints.isEmpty();
         double maxPop = hasPopulation ? popPoints.stream().mapToInt(PopulationPoint::getCount).max().orElse(1) : 1;
