@@ -24,3 +24,6 @@ const MapConfig = {
         }
     }
 };
+
+// 초기화 시 서버 설정 로드 실행
+MapConfig.fetchConfig();

@@ -109,10 +109,6 @@ body {
     color: #2c3e50;
 }
 
-/* =========================================
-   New Styles for Layer Control & Import 
-   ========================================= */
-
 /* Layer Control Panel */
 .layer-control {
     position: absolute;
@@ -161,8 +157,31 @@ body {
     margin: 10px 0;
 }
 
+.admin-toggle-wrapper {
+    margin-top: 10px;
+    padding-top: 5px;
+    border-top: 1px solid #eee;
+    text-align: right;
+}
+
+#toggle-admin {
+    font-size: 11px;
+    color: #aaa;
+    cursor: pointer;
+    transition: color 0.2s;
+    user-select: none;
+}
+
+#toggle-admin:hover {
+    color: #666;
+}
+
 /* Import Button */
 #btn-import-data {
+    position: absolute;
+    bottom: 30px;
+    left: 20px;
+    z-index: 1000;
     padding: 12px 24px;
     background-color: #e74c3c;
     color: white;
@@ -173,7 +192,6 @@ body {
     font-size: 14px;
     box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
     transition: all 0.3s ease;
-    width: 100%;
 }
 
 #btn-import-data:hover {
@@ -193,7 +211,7 @@ body {
     box-shadow: none;
 }
 
-/* 줌 컨트롤(Zoom Control) 우측 하단 고정 */
+/* 줌 컨트롤 (Zoom Control) 우측 하단 고정 */
 #map .ol-zoom {
     top: unset !important;
     left: unset !important;
@@ -229,41 +247,41 @@ body {
     background-color: transparent !important;
 }
 
-/* Admin Section Wrapper */
-#admin-section {
-    position: fixed;
-    left: 20px;
-    bottom: 20px;
-    z-index: 1001;
-    background: white;
-    padding: 15px;
-    border-radius: 8px;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-    min-width: 220px;
-    border: 1px solid #eee;
+/* 맵 타입 컨트롤 (우측 하단 줌 버튼 위) */
+.map-type-control {
+    position: absolute;
+    bottom: 110px;
+    right: 20px;
+    z-index: 1000;
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    background-color: rgba(255, 255, 255, 0.9);
+    padding: 5px;
+    border-radius: 6px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+    border: 1px solid #ccc;
 }
 
-.admin-toggle-wrapper {
-    margin-top: 10px;
-    padding-top: 5px;
-    border-top: 1px solid #eee;
-    text-align: right;
-}
-
-#toggle-admin {
-    font-size: 11px;
-    color: #999;
-    cursor: pointer;
-    transition: color 0.2s;
-    user-select: none;
-}
-
-#toggle-admin:hover {
-    color: #666;
-    text-decoration: underline;
-}
-
-#toggle-admin.active {
-    color: #e74c3c;
+.map-type-control button {
+    border: 1px solid #ddd;
+    background-color: white;
+    color: #333;
+    padding: 6px 10px;
+    font-size: 13px;
     font-weight: bold;
+    cursor: pointer;
+    border-radius: 4px;
+    transition: all 0.2s;
+    min-width: 50px;
+}
+
+.map-type-control button:hover {
+    background-color: #f1f1f1;
+}
+
+.map-type-control button.active {
+    background-color: #3498db;
+    color: white;
+    border-color: #2980b9;
 }

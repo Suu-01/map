@@ -19,7 +19,6 @@ if (btnImport) {
                 if (typeof cctvSource !== 'undefined') cctvSource.clear();
                 if (typeof policeSource !== 'undefined') policeSource.clear();
                 if (typeof lightSource !== 'undefined') lightSource.clear();
-                if (typeof heatmapSource !== 'undefined') heatmapSource.clear();
                 if (typeof refinedRiskSource !== 'undefined') refinedRiskSource.clear();
 
                 alert('데이터 가져오기 시작됨!\n\n완료까지 1~2분 정도 걸릴 수 있습니다.\n잠시 후 체크박스를 다시 켜면 최신 데이터가 반영됩니다.');

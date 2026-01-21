@@ -1,7 +1,6 @@
 package com.du.gis_project.controller;
 
 import com.du.gis_project.domain.dto.RiskPointDto;
-import com.du.gis_project.domain.dto.HeatmapPointDto;
 import com.du.gis_project.domain.entity.RiskType;
 import com.du.gis_project.service.CsvImportService;
 import com.du.gis_project.service.RiskService;
@@ -69,24 +68,16 @@ public class RiskApiController {
             } else {
                 risks = riskService.getRisksByType(RiskType.valueOf(type));
             }
+
+            // 성남시 경계 밖의 시설물(타 지역 경찰서 등)은 마커 표시에서 제외
+            risks = risks.stream()
+                    .filter(r -> riskIntegrationService.isInsideSeongnam(r.getLatitude(), r.getLongitude()))
+                    .toList();
+
             return Map.of("status", "OK", "result", risks);
         } catch (IllegalArgumentException e) {
             return Map.of("status", "ERROR", "message", "Invalid RiskType: " + type);
         } catch (Exception e) {
-            return Map.of("status", "ERROR", "message", e.getMessage());
-        }
-    }
-
-    /**
-     * Retrieve Integrated Blind Spot Data
-     */
-    @GetMapping("/api/risks/blind-spots")
-    public Map<String, Object> getBlindSpots() {
-        try {
-            List<HeatmapPointDto> result = riskIntegrationService.calculateBlindSpots();
-            return Map.of("status", "OK", "result", result);
-        } catch (Exception e) {
-            e.printStackTrace();
             return Map.of("status", "ERROR", "message", e.getMessage());
         }
     }

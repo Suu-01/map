@@ -27,7 +27,6 @@
         <label><input type="checkbox" id="chk-police" value="POLICE"> Police (경찰서)</label>
         <label><input type="checkbox" id="chk-light" value="STREET_LIGHT"> Street Lamp (가로등)</label>
         <hr>
-        <label><input type="checkbox" id="chk-heatmap" value="HEATMAP"> Integrated Risk Heatmap (통합 위험도)</label>
         <label><input type="checkbox" id="chk-refined-risk" value="REFINED_RISK"> 위험도 히트맵</label>
         <div class="admin-toggle-wrapper">
             <span id="toggle-admin">⚙️ Admin Settings</span>
@@ -37,6 +36,12 @@
     <!-- Data Import Admin Section (Hidden by default) -->
     <div id="admin-section" style="display: none;">
         <button id="btn-import-data">🔄 데이터 가져오기 (관리자용)</button>
+    </div>
+
+    <!-- 맵 타입 선택 (우측 하단 줌 버튼 위) -->
+    <div class="map-type-control">
+        <button id="btn-base" class="active">일반</button>
+        <button id="btn-satellite">위성</button>
     </div>
 
     <div id="map"></div>
