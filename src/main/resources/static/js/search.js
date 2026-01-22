@@ -1,172 +1,199 @@
 // ============================
-// 검색 및 지도 상호작용 로직
+// 검색 및 지도 상호작용 로직 (고정밀 v6 - 정제된 데이터 처리 및 방어 코드)
 // ============================
 
 /**
- * 특정 좌표에 마커를 추가하는 함수
+ * 주소 검색 기능 (VWorld Search API 2.0 연동 - 4단계 파이프라인 대응)
  */
-function addMarker(lon, lat) {
-    // 기존 마커 삭제 (항상 최신 핑만 유지)
-    markerSource.clear();
+async function performSearch() {
+    const searchInput = document.getElementById('search-input');
+    if (!searchInput) return;
 
-    const marker = new ol.Feature({
-        geometry: new ol.geom.Point(
-            ol.proj.fromLonLat([lon, lat])
-        )
-    });
+    const query = searchInput.value.trim();
+    if (!query) return alert("주소를 입력하세요.");
 
-    marker.setStyle(iconStyle);
-    markerSource.addFeature(marker);
+    try {
+        // 검색 시작 시 피드백
+        markerSource.clear();
+        overlay.setPosition(undefined);
+
+        const response = await fetch(`/api/proxy/search?address=${encodeURIComponent(query)}`);
+        const jsonResponse = await response.json();
+
+        if (jsonResponse.status === "ERROR") {
+            console.error("서버 오류:", jsonResponse.message);
+            alert("검색 중 오류가 발생했습니다: " + jsonResponse.message);
+            return;
+        }
+
+        const data = JSON.parse(jsonResponse.data);
+        const results = data.response.result;
+
+        if (data.response.status === "OK" && results && results.items && results.items.length > 0) {
+            const item = results.items[0];
+            const x = parseFloat(item.point.x);
+            const y = parseFloat(item.point.y);
+
+            // [UI 최적화] 검색 방식에 따른 스마트 타이틀 결정
+            const foundType = jsonResponse.foundType; // place, road, parcel, district
+            const roadAddr = item.address?.road || "";
+            const parcelAddr = item.address?.parcel || "";
+
+            // HTML 태그 제거 및 정리
+            let cleanTitle = (item.title || "").replace(/<[^>]*>?/gm, '').trim();
+
+            // 제목 결정 로직 (사용자가 입력한 검색어를 우선적으로 존중)
+            if (foundType === 'place' && cleanTitle && cleanTitle !== roadAddr && cleanTitle !== parcelAddr) {
+                // 확실한 명칭이 발견된 경우
+            } else {
+                // 주소 검색 결과인 경우 사용자의 입력값이나 정제된 쿼리를 제목으로 사용
+                cleanTitle = jsonResponse.query || query;
+            }
+
+            // 1. 지도 이동
+            map.getView().animate({
+                center: [x, y],
+                zoom: 17,
+                duration: 900,
+                easing: ol.easing.easeOut
+            }, (complete) => {
+                if (complete) {
+                    overlay.setPosition([x, y]);
+
+                    // 팝업 내용 구성
+                    let popupHtml = `
+                        <div style="min-width: 220px; padding: 5px;">
+                            <div style="font-weight: 800; color: #2c3e50; font-size: 16px; margin-bottom: 8px; border-bottom: 1px solid #eee; padding-bottom: 5px;">
+                                📍 ${cleanTitle}
+                            </div>
+                            <div style="font-size: 13px; color: #555; line-height: 1.6;">
+                    `;
+
+                    // 도로명 주소 표시
+                    if (roadAddr) {
+                        popupHtml += `<div style="margin-bottom: 5px; display: flex; align-items: flex-start;">
+                            <span style="background: #3498db; color: white; font-size: 10px; padding: 2px 4px; border-radius: 3px; font-weight: bold; margin-right: 6px; white-space: nowrap; margin-top: 2px;">도로명</span>
+                            <span>${roadAddr}</span>
+                        </div>`;
+                    }
+
+                    // 지번 주소 표시
+                    if (parcelAddr) {
+                        popupHtml += `<div style="display: flex; align-items: flex-start;">
+                            <span style="background: #95a5a6; color: white; font-size: 10px; padding: 2px 4px; border-radius: 3px; font-weight: bold; margin-right: 6px; white-space: nowrap; margin-top: 2px;">지번</span>
+                            <span>${parcelAddr}</span>
+                        </div>`;
+                    }
+
+                    // 검색 편의성 정보 추가
+                    let typeLabel = "";
+                    if (foundType === 'road') typeLabel = "도로명 주소 검색 결과입니다.";
+                    else if (foundType === 'parcel') typeLabel = "지번 주소(필지) 검색 결과입니다.";
+                    else if (foundType === 'district') typeLabel = "행정 구역 검색 결과입니다.";
+
+                    if (typeLabel) {
+                        popupHtml += `<div style="margin-top: 8px; font-size: 11px; color: #e67e22; border-top: 1px dashed #ddd; padding-top: 5px;">* ${typeLabel}</div>`;
+                    }
+
+                    popupHtml += `</div></div>`;
+                    content.innerHTML = popupHtml;
+                }
+            });
+
+            // 2. 마커 표시
+            const feature = new ol.Feature({
+                geometry: new ol.geom.Point([x, y])
+            });
+            feature.setStyle(iconStyle);
+            markerSource.addFeature(feature);
+
+        } else {
+            alert("검색 결과가 없습니다. 도로명 주소나 명칭을 정확히 입력해 주세요.");
+        }
+    } catch (e) {
+        console.error("검색 중 오류 발생:", e);
+        alert("검색 처리 중 오류가 발생했습니다.");
+    }
 }
 
-// 1. 지도 클릭 시 마커 생성 및 실제 주소 정보 표시
+/**
+ * 지도를 클릭했을 때 상세 주소 정보를 가져오는 함수 (Reverse Geocoding)
+ */
 if (map) {
-    map.on('click', function (evt) {
+    map.on('click', async function (evt) {
         const coord = ol.proj.toLonLat(evt.coordinate);
         const lon = coord[0];
         const lat = coord[1];
 
-        // 좌표에 마커 추가
-        addMarker(lon, lat);
+        markerSource.clear();
+        overlay.setPosition(undefined);
 
-        // 팝업 오버레이 위치 설정 및 로딩 표시
-        overlay.setPosition(evt.coordinate);
-        content.innerHTML = `
-            <p style="margin: 0; font-size: 13px; color: #666;">정보를 불러오는 중...</p>
-        `;
-
-        // 백엔드 중계 API 호출하여 주소 정보 획득 (VWorld Reverse Geocoding)
-        const apiUrl = `/api/proxy/address?lon=${lon}&lat=${lat}`;
-
-        fetch(apiUrl)
-            .then(res => res.json())
-            .then(data => {
-                if (data.status === 'OK' || (data.response && data.response.status === 'OK')) {
-                    const result = (data.response ? data.response.result[0] : data.result[0]);
-                    const address = result.text;
-                    const type = result.type === 'parcel' ? '지번 주소' : '도로명 주소';
-
-                    content.innerHTML = `
-                        <span style="font-weight: bold; color: #2ecc71;">[${type}]</span><br/>
-                        ${address}<br/>
-                        <p style="margin-top: 8px; font-size: 11px; color: #999; margin-bottom: 0;">
-                            좌표: ${lon.toFixed(5)}, ${lat.toFixed(5)}
-                        </p>
-                    `;
-                } else {
-                    content.innerHTML = `
-                        주소 정보를 찾을 수 없는 지역입니다.<br/>
-                        <p style="margin-top: 8px; font-size: 11px; color: #999; margin-bottom: 0;">
-                            좌표: ${lon.toFixed(5)}, ${lat.toFixed(5)}
-                        </p>
-                    `;
-                }
-            })
-            .catch(err => {
-                console.error('주소 변환 에러:', err);
-                content.innerHTML = `<b>⚠️ 오류 발생</b><br/>서버 통신에 실패했습니다.`;
-            });
-    });
-}
-
-// 2. 주소 및 장소 검색 기능
-const searchInput = document.getElementById('search-input');
-const searchButton = document.getElementById('search-button');
-
-/**
- * 사용자가 입력한 키워드로 주소나 장소를 검색하는 함수
- */
-function performSearch() {
-    if (!searchInput) return;
-    const query = searchInput.value.trim();
-    if (!query) {
-        alert('검색어를 입력하세요.');
-        return;
-    }
-
-    // 백엔드 통합 검색 API 호출
-    fetch(`/api/proxy/search?address=${encodeURIComponent(query)}`)
-        .then(res => res.json())
-        .then(data => {
-            if (data.response && data.response.status === 'OK' && data.response.result && data.response.result.items.length > 0) {
-                const items = data.response.result.items;
-
-                // 최적의 결과 찾기 (띄어쓰기 무시 및 가중치 계산)
-                let bestItem = items[0];
-                let maxScore = -1;
-                const cleanQuery = query.replace(/\s/g, ''); // 검색어 공백 제거
-
-                items.forEach(item => {
-                    const originalTitle = item.title.replace(/<[^>]*>?/gm, '').trim(); // HTML 태그 제거
-                    const noSpaceTitle = originalTitle.replace(/\s/g, ''); // 제목 공백 제거
-                    let score = 0;
-
-                    // 점수 계산 방식
-                    if (noSpaceTitle === cleanQuery) {
-                        score += 100; // 완전 일치
-                    } else if (noSpaceTitle.includes(cleanQuery) || cleanQuery.includes(noSpaceTitle)) {
-                        score += 50; // 부분 일치
-                    }
-
-                    // 명칭이 짧을수록 우선순위 상승
-                    score += (100 - noSpaceTitle.length);
-
-                    if (score > maxScore) {
-                        maxScore = score;
-                        bestItem = item;
-                    }
-                });
-
-                const item = bestItem;
-                const lon = parseFloat(item.point.x);
-                const lat = parseFloat(item.point.y);
-                const coordinate = ol.proj.fromLonLat([lon, lat]);
-
-                // 마커 및 팝업 내용 준비
-                markerSource.clear();
-                addMarker(lon, lat);
-
-                content.innerHTML = `
-                    <span style="font-weight: bold; color: #3498db;">[검색 결과]</span><br/>
-                    <span style="font-weight: bold;">${item.title}</span><br/>
-                    <span style="font-size: 12px; color: #555;">${item.address.road || item.address.parcel || ''}</span>
-                    <p style="margin-top: 8px; font-size: 11px; color: #999; margin-bottom: 0;">
-                        좌표: ${lon.toFixed(5)}, ${lat.toFixed(5)}
-                    </p>
-                `;
-
-                // 지도 이동 애니메이션 실행
-                map.getView().cancelAnimations();
-                map.getView().animate({
-                    center: coordinate,
-                    zoom: 17,
-                    duration: 800,
-                    easing: ol.easing.easeOut
-                }, function (complete) {
-                    if (complete) {
-                        // 이동 완료 후 팝업 표시
-                        overlay.setPosition(coordinate);
-                    }
-                });
-            } else {
-                const status = data.response ? data.response.status : 'UNKNOWN';
-                alert(`검색 결과를 찾을 수 없습니다.\n정확한 주소나 장소명을 입력해 보세요.`);
-            }
-        })
-        .catch(err => {
-            console.error('검색 수행 에러:', err);
-            alert('검색 도중 서버 오류가 발생했습니다.');
+        const marker = new ol.Feature({
+            geometry: new ol.geom.Point(evt.coordinate)
         });
-}
+        marker.setStyle(iconStyle);
+        markerSource.addFeature(marker);
 
-// 검색 클릭 및 엔터 키 바인딩
-if (searchButton) {
-    searchButton.addEventListener('click', performSearch);
-}
-if (searchInput) {
-    searchInput.addEventListener('keypress', function (e) {
-        if (e.key === 'Enter') {
-            performSearch();
+        try {
+            const response = await fetch(`/api/proxy/address?lon=${lon}&lat=${lat}`);
+            const jsonResponse = await response.json();
+
+            if (jsonResponse.status === "OK") {
+                const data = JSON.parse(jsonResponse.data);
+                let results = data.response.result;
+
+                if (data.response.status === "OK" && results) {
+                    overlay.setPosition(evt.coordinate);
+
+                    // 결과를 무조건 배열로 처리 (VWorld가 단일 객체로 줄 가능성 대비)
+                    if (!Array.isArray(results)) {
+                        results = [results];
+                    }
+
+                    if (results.length > 0) {
+                        let popupHtml = `
+                            <div style="min-width: 200px; padding: 5px;">
+                                <div style="font-weight: 800; color: #2c3e50; font-size: 14px; margin-bottom: 8px; border-bottom: 1px solid #eee; padding-bottom: 5px;">📍 선택한 위치</div>
+                                <div style="font-size: 13px; color: #555; line-height: 1.6;">
+                        `;
+
+                        results.forEach(res => {
+                            if (!res.text) return;
+                            const type = res.type; // "road" or "parcel"
+                            const label = (type === 'road') ? '도로명' : '지번';
+                            const bgColor = (type === 'road') ? '#3498db' : '#95a5a6';
+
+                            popupHtml += `
+                                <div style="margin-bottom: 4px; display: flex; align-items: flex-start;">
+                                    <span style="background: ${bgColor}; color: white; font-size: 10px; padding: 2px 4px; border-radius: 3px; font-weight: bold; margin-right: 6px; white-space: nowrap; margin-top: 2px;">${label}</span>
+                                    <span>${res.text}</span>
+                                </div>
+                            `;
+                        });
+
+                        popupHtml += `</div></div>`;
+                        content.innerHTML = popupHtml;
+                    }
+                } else {
+                    overlay.setPosition(evt.coordinate);
+                    content.innerHTML = '<div style="padding: 10px; font-size: 13px;">주소 정보를 찾을 수 없습니다.</div>';
+                }
+            }
+        } catch (e) {
+            console.error("주소 조회 오류:", e);
         }
     });
 }
+
+// 이벤트 바인딩
+document.addEventListener('DOMContentLoaded', () => {
+    const searchBtn = document.getElementById('search-button');
+    const searchInp = document.getElementById('search-input');
+
+    if (searchBtn) searchBtn.onclick = performSearch;
+    if (searchInp) {
+        searchInp.onkeypress = (e) => {
+            if (e.key === 'Enter') performSearch();
+        };
+    }
+});

@@ -6,20 +6,21 @@ import com.du.gis_project.service.CsvImportService;
 import com.du.gis_project.service.RiskService;
 import com.du.gis_project.service.RiskIntegrationService;
 import com.du.gis_project.config.GisConfig;
-import org.springframework.http.converter.StringHttpMessageConverter;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.client.RestTemplate;
-import org.springframework.web.util.UriComponentsBuilder;
 
-import java.net.URI;
-import java.nio.charset.StandardCharsets;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 @RestController
 public class RiskApiController {
 
-    // VWorld API Key
+    private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(RiskApiController.class);
+
     private final CsvImportService csvImportService;
     private final RiskService riskService;
     private final RiskIntegrationService riskIntegrationService;
@@ -33,181 +34,251 @@ public class RiskApiController {
         this.gisConfig = gisConfig;
     }
 
-    // ============================
-    // 1. Data Management Endpoints
-    // ============================
-
     /**
-     * Trigger CSV Import (CCTV, Police, Streetlight)
+     * CSV 데이터 임포트 실행
      */
     @PostMapping("/api/import")
-    public Map<String, Object> importData() {
+    public ResponseEntity<Map<String, Object>> importData() {
+        Map<String, Object> result = new HashMap<>();
         try {
             csvImportService.importAllData();
-            return Map.of("status", "OK", "message", "Import completed successfully");
+            result.put("status", "OK");
+            result.put("message", "데이터 임포트가 완료되었습니다.");
+            return ResponseEntity.ok(result);
         } catch (Exception e) {
-            e.printStackTrace(); // Log to server console
-            return Map.of(
-                    "status", "ERROR",
-                    "message", e.getMessage() != null ? e.getMessage() : "Unknown Error",
-                    "class", e.getClass().getName());
+            log.error("Error in data import: {}", e.getMessage(), e);
+            result.put("status", "ERROR");
+            result.put("message", e.getMessage());
+            return ResponseEntity.status(500).body(result);
         }
     }
 
     /**
-     * Retrieve Risk Points
-     * 
-     * @param type Optional (ALL, CCTV, POLICE, STREET_LIGHT)
+     * 안전 시설물 데이터 조회 (CCTV, 경찰서, 가로등)
      */
     @GetMapping("/api/risks")
-    public Map<String, Object> getRisks(@RequestParam(required = false) String type) {
+    public ResponseEntity<Map<String, Object>> getRisks(@RequestParam(required = false) RiskType type) {
+        Map<String, Object> result = new HashMap<>();
         try {
-            List<RiskPointDto> risks;
-            if (type == null || type.equals("ALL") || type.isEmpty()) {
-                risks = riskService.getAllRisks();
+            List<RiskPointDto> list;
+            if (type != null) {
+                list = riskService.getRisksByType(type);
             } else {
-                risks = riskService.getRisksByType(RiskType.valueOf(type));
+                list = riskService.getAllRisks();
             }
-
-            // 성남시 경계 밖의 시설물(타 지역 경찰서 등)은 마커 표시에서 제외
-            risks = risks.stream()
-                    .filter(r -> riskIntegrationService.isInsideSeongnam(r.getLatitude(), r.getLongitude()))
-                    .toList();
-
-            return Map.of("status", "OK", "result", risks);
-        } catch (IllegalArgumentException e) {
-            return Map.of("status", "ERROR", "message", "Invalid RiskType: " + type);
+            result.put("status", "OK");
+            result.put("result", list);
+            return ResponseEntity.ok(result);
         } catch (Exception e) {
-            return Map.of("status", "ERROR", "message", e.getMessage());
+            log.error("Error in getRisks: {}", e.getMessage(), e);
+            result.put("status", "ERROR");
+            result.put("message", e.getMessage());
+            return ResponseEntity.status(500).body(result);
         }
     }
 
     /**
-     * Retrieve Refined Risk Heatmap Data
+     * 정밀 위험도 히트맵 데이터 조회
      */
     @GetMapping("/api/risks/refined-risk")
-    public Map<String, Object> getRefinedRisk() {
+    public ResponseEntity<Map<String, Object>> getRefinedRisk() {
         try {
-            Map<String, Object> result = riskIntegrationService.calculateRefinedRiskMap();
-            result.put("status", "OK");
-            return result;
+            Map<String, Object> heatmapData = riskIntegrationService.calculateRefinedRiskMap();
+            heatmapData.put("status", "OK");
+            return ResponseEntity.ok(heatmapData);
         } catch (Exception e) {
-            e.printStackTrace();
-            return Map.of("status", "ERROR", "message", e.getMessage());
+            log.error("Error in getRefinedRisk: {}", e.getMessage(), e);
+            Map<String, Object> error = new HashMap<>();
+            error.put("status", "ERROR");
+            error.put("message", e.getMessage());
+            return ResponseEntity.status(500).body(error);
         }
     }
 
+    /**
+     * 클라이언트 설정을 반환합니다.
+     */
     @GetMapping("/api/config")
-    public GisConfig getConfig() {
-        return gisConfig;
-    }
+    public ResponseEntity<Map<String, Object>> getConfig() {
+        try {
+            Map<String, Object> config = new HashMap<>();
 
-    // ============================
-    // 2. VWorld Proxy Endpoints (Existing)
-    // ============================
+            Map<String, Object> vworld = new HashMap<>();
+            vworld.put("key", gisConfig.getVworld().getKey());
+            config.put("vworld", vworld);
+
+            Map<String, Object> map = new HashMap<>();
+            Map<String, Object> center = new HashMap<>();
+            center.put("lon", gisConfig.getMap().getCenter().getLon());
+            center.put("lat", gisConfig.getMap().getCenter().getLat());
+            map.put("center", center);
+            config.put("map", map);
+
+            return ResponseEntity.ok(config);
+        } catch (Exception e) {
+            log.error("Error in getConfig: {}", e.getMessage(), e);
+            Map<String, Object> error = new HashMap<>();
+            error.put("status", "ERROR");
+            error.put("message", e.getMessage());
+            return ResponseEntity.status(500).body(error);
+        }
+    }
 
     /**
      * 좌표로 주소 조회 (Reverse Geocoding)
      */
     @GetMapping("/api/proxy/address")
-    public String getAddress(@RequestParam double lon, @RequestParam double lat) {
-        String apiUrl = String.format(
-                "https://api.vworld.kr/req/address?service=address&request=getAddress&version=2.0&crs=epsg:4326&point=%f,%f&format=json&type=both&key=%s",
-                lon, lat, gisConfig.getVworld().getKey());
-
+    public ResponseEntity<Map<String, Object>> getAddress(@RequestParam double lon, @RequestParam double lat) {
+        String apiKey = gisConfig.getVworld().getKey();
         RestTemplate restTemplate = new RestTemplate();
-        restTemplate.getMessageConverters().add(0, new StringHttpMessageConverter(StandardCharsets.UTF_8));
+        Map<String, Object> result = new HashMap<>();
 
         try {
-            return restTemplate.getForObject(apiUrl, String.class);
+            // RestTemplate 템플릿 방식 사용하여 인코딩 호환성 높임
+            String url = "https://api.vworld.kr/req/address?service=address&request=getAddress&version=2.0&crs=epsg:4326&point={point}&format=json&type=both&key={key}";
+
+            Map<String, String> params = new HashMap<>();
+            params.put("point", String.format("%.7f,%.7f", lon, lat));
+            params.put("key", apiKey);
+
+            log.info("VWorld GetAddress Calling with lat={}, lon={}", lat, lon);
+            String response = restTemplate.getForObject(url, String.class, params);
+
+            result.put("status", "OK");
+            result.put("data", response);
+            return ResponseEntity.ok(result);
         } catch (Exception e) {
-            return "{\"response\":{\"status\":\"ERROR\"}}";
+            log.error("Error in getAddress proxy: {}", e.getMessage(), e);
+            result.put("status", "ERROR");
+            result.put("message", e.getMessage());
+            return ResponseEntity.status(500).body(result);
         }
     }
 
     /**
-     * 통합 검색 (지능형 분석 및 결과 정밀화 - v5)
+     * 주소 검색 (VWorld 검색 API 2.0 프록시 - 초정밀 Smart 4단계 파이프라인)
      */
     @GetMapping("/api/proxy/search")
-    public String searchAddress(@RequestParam String address) {
+    public ResponseEntity<Map<String, Object>> searchAddress(@RequestParam String address) {
         RestTemplate restTemplate = new RestTemplate();
-        restTemplate.getMessageConverters().add(0, new StringHttpMessageConverter(StandardCharsets.UTF_8));
-
-        String query = address.trim();
-
-        // 1. 고도화된 주소 패턴 감지 (정규식 강화)
-        // - 경기도, 성남시, 수정구 등 지역 명칭이 포함된 경우 주소로 판단
-        boolean isAddressLikely = query.matches(".*[로길동리읍면]$") ||
-                query.matches(".*[로길]\\s?\\d+.*") ||
-                query.matches(".*\\d+번길.*") ||
-                query.matches(".*\\d+-\\d+.*") ||
-                query.contains("도 ") ||
-                query.contains("시 ") ||
-                query.contains("구 ") ||
-                query.contains("지번") ||
-                query.contains("대로");
-
-        String response;
-
-        if (isAddressLikely) {
-            // [주소 우선 모드] address -> place -> district
-            response = callVWorldSearch(query, "address", restTemplate);
-            if (shouldRetry(response)) {
-                response = callVWorldSearch(query, "place", restTemplate);
-            }
-        } else {
-            // [장소 우선 모드] place -> address -> district
-            response = callVWorldSearch(query, "place", restTemplate);
-            if (shouldRetry(response)) {
-                response = callVWorldSearch(query, "address", restTemplate);
-            }
-        }
-
-        // 마지막 보루: 행정구역
-        if (shouldRetry(response)) {
-            response = callVWorldSearch(query, "district", restTemplate);
-        }
-
-        return response;
-    }
-
-    private String callVWorldSearch(String query, String type, RestTemplate restTemplate) {
+        Map<String, Object> result = new HashMap<>();
         try {
-            URI uri = UriComponentsBuilder.fromUriString("https://api.vworld.kr/req/search")
-                    .queryParam("service", "search")
-                    .queryParam("request", "search")
-                    .queryParam("version", "2.0")
-                    .queryParam("crs", "EPSG:4326")
-                    .queryParam("query", query)
-                    .queryParam("type", type)
-                    .queryParam("format", "json")
-                    .queryParam("key", gisConfig.getVworld().getKey())
-                    .build()
-                    .encode()
-                    .toUri();
+            String apiKey = gisConfig.getVworld().getKey();
+            String query = address != null ? address.trim() : "";
+            if (query.isEmpty()) {
+                return ResponseEntity.badRequest().body(Map.of("status", "ERROR", "message", "검색어가 비어있습니다."));
+            }
 
-            return restTemplate.getForObject(uri, String.class);
+            // 1단계: 장소(place) 검색
+            String response = callVWorldSearch(restTemplate, apiKey, "place", null, query);
+            String foundType = "place";
+
+            // 2단계: 도로명 주소(road) 검색 - 원본 쿼리
+            if (isNotFound(response)) {
+                response = callVWorldSearch(restTemplate, apiKey, "address", "road", query);
+                foundType = "road";
+            }
+
+            // 2.5단계: 도로명 주소(road) 검색 - 정제된 쿼리 (괄호 제거 및 도로명만 추출)
+            if (isNotFound(response)) {
+                String cleanQuery = refineRoadQuery(query);
+                if (!cleanQuery.equals(query)) {
+                    response = callVWorldSearch(restTemplate, apiKey, "address", "road", cleanQuery);
+                    foundType = "road";
+                }
+            }
+
+            // 3단계: 지번 주소(parcel) 검색 - 원본 쿼리
+            if (isNotFound(response)) {
+                response = callVWorldSearch(restTemplate, apiKey, "address", "parcel", query);
+                foundType = "parcel";
+            }
+
+            // 3.5단계: 지번 주소(parcel) 검색 - 정제된 쿼리 (동+지번만 추출)
+            if (isNotFound(response)) {
+                String cleanParcel = refineParcelQuery(query);
+                if (!cleanParcel.equals(query)) {
+                    response = callVWorldSearch(restTemplate, apiKey, "address", "parcel", cleanParcel);
+                    foundType = "parcel";
+                }
+            }
+
+            // 4단계: 행정구역(district) 검색
+            if (isNotFound(response)) {
+                response = callVWorldSearch(restTemplate, apiKey, "district", null, query);
+                foundType = "district";
+            }
+
+            // 최종 결과 확인
+            if (isNotFound(response)) {
+                log.warn("All search stages failed for query: {}", query);
+            }
+
+            result.put("status", "OK");
+            result.put("data", response);
+            result.put("foundType", foundType);
+            result.put("query", query);
+            return ResponseEntity.ok(result);
         } catch (Exception e) {
-            return String.format("{\"response\":{\"status\":\"ERROR\", \"message\":\"%s\"}}", e.getMessage());
+            log.error("Error in Smart searchAddress proxy: {}", e.getMessage(), e);
+            result.put("status", "ERROR");
+            result.put("message", e.getMessage());
+            return ResponseEntity.status(500).body(result);
         }
     }
 
-    private boolean shouldRetry(String response) {
-        if (response == null)
-            return true;
-
-        // 1. 상태값 체크
-        if (response.contains("\"status\":\"NOT_FOUND\"") || response.contains("\"status\":\"ERROR\"")) {
-            return true;
+    private String callVWorldSearch(RestTemplate restTemplate, String apiKey, String type, String category,
+            String query) {
+        // RestTemplate 템플릿 방식 사용하여 인코딩 자동 처리 (+ vs %20 문제 해결)
+        String url = "https://api.vworld.kr/req/search?service=search&request=search&version=2.0&crs=epsg:3857&size=1&type={type}&query={query}&key={key}";
+        if (category != null) {
+            url += "&category=" + category;
         }
 
-        // 2. 검색 결과 개수 체크 (정규식으로 더 유연하게 탐지)
-        // "total" : "0" 등 모든 형태 대응
-        if (response.replaceAll("\\s", "").contains("\"total\":\"0\"") ||
-                response.replaceAll("\\s", "").contains("\"total\":0")) {
-            return true;
+        Map<String, String> params = new HashMap<>();
+        params.put("type", type);
+        params.put("query", query);
+        params.put("key", apiKey);
+
+        log.info("VWorld API [{}][{}] Calling for: {}", type, (category != null ? category : "-"), query);
+        try {
+            return restTemplate.getForObject(url, String.class, params);
+        } catch (Exception e) {
+            log.error("VWorld API Call Exception: {}", e.getMessage());
+            return null;
+        }
+    }
+
+    private String refineRoadQuery(String query) {
+        // 1. 괄호 내용 제거: "수정로 100 (여수동)" -> "수정로 100"
+        String cleaned = query.replaceAll("\\s*\\([^)]*\\)", "").trim();
+
+        // 2. 도로명 주소 패턴 추출 시도: "성남시 중원구 성남대로 997" -> "성남대로 997"
+        // (VWorld는 시/도 정보가 너무 길면 오히려 검색 실패할 때가 있음)
+        Pattern roadPattern = Pattern.compile("([가-힣a-zA-Z0-9·]+([로|길]))\\s*(\\d+[-]?\\d*)");
+        Matcher matcher = roadPattern.matcher(cleaned);
+        if (matcher.find()) {
+            return matcher.group(0).trim();
         }
 
-        return false;
+        return cleaned;
+    }
+
+    private String refineParcelQuery(String query) {
+        String cleaned = query.replaceAll("\\s*\\([^)]*\\)", "").trim();
+
+        // 지번 주소 패턴 추출 시도: "성남시 분당구 삼평동 717" -> "삼평동 717"
+        Pattern parcelPattern = Pattern.compile("([가-힣0-9]+[동|리|읍|면])\\s*(\\d+[-]?\\d*)");
+        Matcher matcher = parcelPattern.matcher(cleaned);
+        if (matcher.find()) {
+            return matcher.group(0).trim();
+        }
+
+        return cleaned;
+    }
+
+    private boolean isNotFound(String response) {
+        return response == null || response.contains("\"status\":\"NOT_FOUND\"")
+                || response.contains("\"total\":\"0\"");
     }
 }
